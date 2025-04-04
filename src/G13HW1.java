@@ -22,7 +22,7 @@ class myMethod{
         long count = parsedInputPoints.count();
         for(int i=0; i<count; i++){
             Vector point = parsedInputPoints.take(i+1).get(i); // TODO da cambiare
-            double minDistance = 0;
+            double minDistance = Double.MAX_VALUE;
             Vector minC = Vectors.zeros(2); // TODO da cambiare
             for(int j=0; j<C.length; j++){
                 double distance1 = Vectors.sqdist(point, C[j]);
