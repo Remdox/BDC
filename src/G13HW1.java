@@ -35,7 +35,7 @@ class myMethod{
         }
         System.out.println(distance);
         double Delta = (1.0 / count) * distance;
-        System.out.println("Delta: " + Delta);
+        System.out.println("Delta(U, C) = " + Delta);
     }
 }
 
@@ -51,18 +51,16 @@ public class G13HW1 {
         JavaSparkContext sc = new JavaSparkContext(conf);
         sc.setLogLevel("OFF");
 
-        System.out.println(args[0] + " " + args[1] + " " + args[2] + " " + args[3]);
+        System.out.println("Input file = " + args[0] + ", L = " + args[1] + ", K = " + args[2] + ", M = " + args[3]);
         int L = Integer.parseInt(args[1]);
         int K = Integer.parseInt(args[2]);
         int M = Integer.parseInt(args[3]);
         JavaRDD<String> inputPoints = sc.textFile(args[0]).repartition(L).cache();
 
         long N = inputPoints.count();
-        System.out.println("Number of points: " + N);
         long NA = inputPoints.filter(row -> row.endsWith("A")).count();
         long NB = inputPoints.filter(row -> row.endsWith("B")).count();
-        System.out.println("Number of points in A: " + NA);
-        System.out.println("Number of points in B: " + NB);
+        System.out.println("N = " + N + ", NA= " + NA + ", NB = " + NB);
 
         JavaRDD<Vector> parsedInputPoints = inputPoints.map(row -> {
             String[] rowArray = row.split(",");
