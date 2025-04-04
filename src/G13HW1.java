@@ -19,10 +19,11 @@ import java.lang.*;
 class myMethod{
     public static void MRComputeStandardObjective(JavaRDD<Vector> parsedInputPoints, Vector[] C){
         double distance = 0.0;
-        for(int i=0; i<parsedInputPoints.count(); i++){
-            Vector point = parsedInputPoints.take(i+1).get(i);
+        long count = parsedInputPoints.count();
+        for(int i=0; i<count; i++){
+            Vector point = parsedInputPoints.take(i+1).get(i); // TODO da cambiare
             double minDistance = 0;
-            Vector minC = Vectors.zeros(2);
+            Vector minC = Vectors.zeros(2); // TODO da cambiare
             for(int j=0; j<C.length; j++){
                 double distance1 = Vectors.sqdist(point, C[j]);
                 if(distance1 < minDistance){
@@ -33,7 +34,7 @@ class myMethod{
             distance += Vectors.sqdist(point, minC);
         }
         System.out.println(distance);
-        double Delta = (1.0 / parsedInputPoints.count()) * distance;
+        double Delta = (1.0 / count) * distance;
         System.out.println("Delta: " + Delta);
     }
 }
