@@ -19,15 +19,15 @@ import java.lang.*;
 class myMethod{
     public static double MRComputeStandardObjective(JavaRDD<Vector> parsedInputPoints, Vector[] C){
         double totalDistance = parsedInputPoints.map( point -> {
-                    double minDistance = Double.MAX_VALUE;
-                    for(int i=0; i<C.length; i++){
-                        double distance = Vectors.sqdist(point, C[i]);
-                        if(distance < minDistance){
-                            minDistance = distance;
-                        }
-                    }
-                    return minDistance;
-                }).reduce(Double::sum);
+            double minDistance = Double.MAX_VALUE;
+            for (Vector c : C) {
+                double distance = Vectors.sqdist(point, c);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                }
+            }
+            return minDistance;
+        }).reduce(Double::sum);
         return (1.0 / parsedInputPoints.count()) * totalDistance;
     }
 
@@ -43,30 +43,42 @@ class myMethod{
         return Double.max(deltaA, deltaB);
     }
 
-    /*public static void MRPrintStatistics(JavaRDD<String> inputPoints, Vector[] C){
+    public static Map<Vector, Integer> Map(JavaRDD<Vector> parsedInputPoints, Vector[] C){
+        JavaPairRDD<Vector, Integer> N = parsedInputPoints.flatMapToPair(point ->{
+            HashMap<Vector, Integer> counts = new HashMap<>();
+            ArrayList<Tuple2<Vector, Integer>> pairs = new ArrayList<>();
+            double minDistance = Double.MAX_VALUE;
+            Vector minC = Vectors.zeros(2); // TODO da cambiare
+            for (Vector c : C) {
+                double distance = Vectors.sqdist(point, c);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    minC = c;
+                }
+            }
+            counts.put(minC, 1 + counts.getOrDefault(minC, 0));
+            for (Map.Entry<Vector, Integer> e : counts.entrySet()) {
+                pairs.add(new Tuple2<>(e.getKey(), e.getValue()));
+            }
+            return pairs.iterator();
+        }).reduceByKey((x, y) -> x+y);
+        return N.collectAsMap();
+    }
+
+    public static void MRPrintStatistics(JavaRDD<String> inputPoints, Vector[] C){
         JavaRDD<String> inputPointsA = inputPoints.filter(row -> row.endsWith("A"));
         JavaRDD<Vector> parsedInputPointsA = conversion(inputPointsA);
 
         JavaRDD<String> inputPointsB = inputPoints.filter(row -> row.endsWith("B"));
         JavaRDD<Vector> parsedInputPointsB = conversion(inputPointsB);
 
-        JavaPairRDD<Vector, Vector> ciao = parsedInputPointsA.map(point ->{
-            double minDistance = Double.MAX_VALUE;
-            Vector minC = Vectors.zeros(2);
-            for(int i=0; i<C.length; i++){
-                double distance = Vectors.sqdist(point, C[i]);
-                if(distance < minDistance){
-                    minDistance = distance;
-                    minC = C[i];
-                }
-            }
-            return point, minC;
-        });
+        Map<Vector, Integer> NA2 = Map(parsedInputPointsA, C);
+        Map<Vector, Integer> NB2 = Map(parsedInputPointsB, C);
 
         for(int i=0; i<C.length; i++){
-            System.out.println("i = " + i + ", center = " + C[i]);
+            System.out.println("i = " + i + ", center = " + C[i] + ", NA" + i + "= " + NA2.getOrDefault(C[i], 0) + ", NB" + i + "= " + NB2.getOrDefault(C[i], 0));
         }
-    }*/
+    }
 
     public static JavaRDD<Vector> conversion(JavaRDD<String> inputPoints){
         JavaRDD<Vector> parsedInputPoints = inputPoints.map(row -> {
@@ -110,15 +122,18 @@ public class G13HW1 {
 
         KMeansModel clusters = KMeans.train(parsedInputPoints.rdd(), K, M);
         Vector[] C = clusters.clusterCenters();
+        /*Vector[] C = new Vector[4];
+        C[0] = Vectors.dense(40.749035, -73.984431);
+        C[1] = Vectors.dense(40.873440,-74.192170);
+        C[2] = Vectors.dense(40.693363,-74.178147);
+        C[3] = Vectors.dense(40.746095,-73.830627);*/
 
-        //double cost = (1.0 / parsedInputPoints.count()) * clusters.computeCost(parsedInputPoints.rdd());
-        //System.out.println("Cost = " + cost); // Per controllare Delta
         double Delta = myMethod.MRComputeStandardObjective(parsedInputPoints, C);
         System.out.println("Delta(U, C) = " + Delta);
 
         double Phi = myMethod.MRComputeFairObjective(inputPoints, C);
         System.out.println("Phi(A, B, C) = " + Phi);
 
-        //myMethod.MRPrintStatistics(inputPoints, C);
+        myMethod.MRPrintStatistics(inputPoints, C);
     }
 }
