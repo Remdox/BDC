@@ -43,7 +43,7 @@ class myMethod{
         return Double.max(deltaA, deltaB);
     }
 
-    public static Map<Vector, Integer> Map(JavaRDD<Vector> parsedInputPoints, Vector[] C){
+    public static Map<Vector, Integer> mapClusterSizesToCenter(JavaRDD<Vector> parsedInputPoints, Vector[] C){
         JavaPairRDD<Vector, Integer> N = parsedInputPoints.flatMapToPair(point ->{
             HashMap<Vector, Integer> counts = new HashMap<>();
             ArrayList<Tuple2<Vector, Integer>> pairs = new ArrayList<>();
@@ -72,11 +72,13 @@ class myMethod{
         JavaRDD<String> inputPointsB = inputPoints.filter(row -> row.endsWith("B"));
         JavaRDD<Vector> parsedInputPointsB = conversion(inputPointsB);
 
-        Map<Vector, Integer> NA2 = Map(parsedInputPointsA, C);
-        Map<Vector, Integer> NB2 = Map(parsedInputPointsB, C);
+        Map<Vector, Integer> NA2 = mapClusterSizesToCenter(parsedInputPointsA, C);
+        Map<Vector, Integer> NB2 = mapClusterSizesToCenter(parsedInputPointsB, C);
 
+        double[] centerCoordinates;
         for(int i=0; i<C.length; i++){
-            System.out.println("i = " + i + ", center = " + C[i] + ", NA" + i + "= " + NA2.getOrDefault(C[i], 0) + ", NB" + i + "= " + NB2.getOrDefault(C[i], 0));
+            centerCoordinates = C[i].toArray();
+            System.out.println("i = " + i + ", center = (" +  String.format("%.6f", centerCoordinates[0]) + " " + String.format("%.6f", centerCoordinates[1]) + "), NA" + i + "= " + NA2.getOrDefault(C[i], 0) + ", NB" + i + "= " + NB2.getOrDefault(C[i], 0));
         }
     }
 
@@ -128,11 +130,11 @@ public class G13HW1 {
         C[2] = Vectors.dense(40.693363,-74.178147);
         C[3] = Vectors.dense(40.746095,-73.830627);*/
 
-        double Delta = myMethod.MRComputeStandardObjective(parsedInputPoints, C);
-        System.out.println("Delta(U, C) = " + Delta);
+        double delta = myMethod.MRComputeStandardObjective(parsedInputPoints, C);
+        System.out.println("Delta(U, C) = " + String.format("%.6f", delta));
 
-        double Phi = myMethod.MRComputeFairObjective(inputPoints, C);
-        System.out.println("Phi(A, B, C) = " + Phi);
+        double phi = myMethod.MRComputeFairObjective(inputPoints, C);
+        System.out.println("Phi(A, B, C) = " + String.format("%.6f", phi));
 
         myMethod.MRPrintStatistics(inputPoints, C);
     }
