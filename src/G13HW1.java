@@ -48,7 +48,7 @@ class myMethod{
             HashMap<Vector, Integer> counts = new HashMap<>();
             ArrayList<Tuple2<Vector, Integer>> pairs = new ArrayList<>();
             double minDistance = Double.MAX_VALUE;
-            Vector minC = Vectors.zeros(2); // TODO da cambiare
+            Vector minC = Vectors.zeros(C.length);
             for (Vector c : C) {
                 double distance = Vectors.sqdist(point, c);
                 if (distance < minDistance) {
