@@ -16,7 +16,7 @@ import java.io.IOException;
 import java.util.*;
 import java.lang.*;
 
-class myMethod{
+class methodsHW1{
     public static double MRComputeStandardObjective(JavaRDD<Vector> parsedInputPoints, Vector[] C){
         double totalDistance = parsedInputPoints.map( point -> {
             double minDistance = Double.MAX_VALUE;
@@ -43,7 +43,8 @@ class myMethod{
         return Double.max(deltaA, deltaB);
     }
 
-    public static Map<Vector, Integer> mapClusterSizesToCenter(JavaRDD<Vector> parsedInputPoints, Vector[] C){
+    public static Map<Vector, Integer> mapClusterSizesToCenter(JavaRDD<Vector> parsedInputPoints, Vector[] C, Integer L){
+        Random randomGenerator = new Random();
         JavaPairRDD<Vector, Integer> N = parsedInputPoints.flatMapToPair(point ->{
             HashMap<Vector, Integer> counts = new HashMap<>();
             ArrayList<Tuple2<Vector, Integer>> pairs = new ArrayList<>();
@@ -56,24 +57,36 @@ class myMethod{
                     minC = c;
                 }
             }
-            counts.put(minC, 1 + counts.getOrDefault(minC, 0));
+            counts.put(minC, 1 + counts.getOrDefault(minC, 0)); // TODO remove HashMap
             for (Map.Entry<Vector, Integer> e : counts.entrySet()) {
                 pairs.add(new Tuple2<>(e.getKey(), e.getValue()));
             }
             return pairs.iterator();
-        }).reduceByKey((x, y) -> x+y);
+        }).groupBy((wordcountpair) -> randomGenerator.nextInt(L))
+        .flatMapToPair(element ->{
+            HashMap<Vector, Integer> counts = new HashMap<>();
+            for (Tuple2<Vector, Integer> c : element._2()) { // TODO convert ALL integers of flatMapToPair to Long and all 0,1 to 0L, 1L
+                counts.put(c._1(), c._2() + counts.getOrDefault(c._1(), 0)); // in sostanza aggrega tutte le frequenze della parola i dei documenti nella stessa partizione
+            }
+            ArrayList<Tuple2<Vector, Integer>> pairs = new ArrayList<>();
+            for (Map.Entry<Vector, Integer> e : counts.entrySet()) {
+                pairs.add(new Tuple2<>(e.getKey(), e.getValue()));
+            }
+            return pairs.iterator();
+        })
+        .reduceByKey((x, y) -> x+y);
         return N.collectAsMap();
     }
 
-    public static void MRPrintStatistics(JavaRDD<String> inputPoints, Vector[] C){
-        JavaRDD<String> inputPointsA = inputPoints.filter(row -> row.endsWith("A"));
+    public static void MRPrintStatistics(JavaRDD<String> inputPoints, Vector[] C, Integer L){
+        JavaRDD<String> inputPointsA = inputPoints.filter(row -> row.endsWith("A")); // TODO: re-utilize filtering done in main?
         JavaRDD<Vector> parsedInputPointsA = conversion(inputPointsA);
 
         JavaRDD<String> inputPointsB = inputPoints.filter(row -> row.endsWith("B"));
         JavaRDD<Vector> parsedInputPointsB = conversion(inputPointsB);
 
-        Map<Vector, Integer> NA2 = mapClusterSizesToCenter(parsedInputPointsA, C);
-        Map<Vector, Integer> NB2 = mapClusterSizesToCenter(parsedInputPointsB, C);
+        Map<Vector, Integer> NA2 = mapClusterSizesToCenter(parsedInputPointsA, C, L);
+        Map<Vector, Integer> NB2 = mapClusterSizesToCenter(parsedInputPointsB, C, L);
 
         double[] centerCoordinates;
         for(int i=0; i<C.length; i++){
@@ -113,14 +126,18 @@ public class G13HW1 {
         int L = Integer.parseInt(args[1]);
         int K = Integer.parseInt(args[2]);
         int M = Integer.parseInt(args[3]);
+
+        // partition the points into L random partitions for the MapReduce algorithm used later in MRPrintStatistics
         JavaRDD<String> inputPoints = sc.textFile(args[0]).repartition(L).cache();
 
+        // as requested, we count the sizes of the two groups
         long N = inputPoints.count();
         long NA = inputPoints.filter(row -> row.endsWith("A")).count();
         long NB = inputPoints.filter(row -> row.endsWith("B")).count();
         System.out.println("N = " + N + ", NA= " + NA + ", NB = " + NB);
 
-        JavaRDD<Vector> parsedInputPoints = myMethod.conversion(inputPoints);
+        // as requested, we first convert the strings given as input into Vector points
+        JavaRDD<Vector> parsedInputPoints = methodsHW1.conversion(inputPoints);
 
         KMeansModel clusters = KMeans.train(parsedInputPoints.rdd(), K, M);
         Vector[] C = clusters.clusterCenters();
@@ -130,12 +147,12 @@ public class G13HW1 {
         C[2] = Vectors.dense(40.693363,-74.178147);
         C[3] = Vectors.dense(40.746095,-73.830627);*/
 
-        double delta = myMethod.MRComputeStandardObjective(parsedInputPoints, C);
+        double delta = methodsHW1.MRComputeStandardObjective(parsedInputPoints, C);
         System.out.println("Delta(U, C) = " + String.format("%.6f", delta));
 
-        double phi = myMethod.MRComputeFairObjective(inputPoints, C);
+        double phi = methodsHW1.MRComputeFairObjective(inputPoints, C);
         System.out.println("Phi(A, B, C) = " + String.format("%.6f", phi));
 
-        myMethod.MRPrintStatistics(inputPoints, C);
+        methodsHW1.MRPrintStatistics(inputPoints, C, L);
     }
 }
