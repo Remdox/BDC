@@ -4,15 +4,11 @@ import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.mllib.clustering.KMeans;
 import org.apache.spark.mllib.clustering.KMeansModel;
 import org.apache.spark.mllib.linalg.Vector;
 import org.apache.spark.mllib.linalg.*;
 import scala.Tuple2;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.util.*;
 import java.lang.*;
 
@@ -43,11 +39,11 @@ class methodsHW1{
         return Double.max(deltaA, deltaB);
     }
 
-    public static Map<Vector, Integer> mapClusterSizesToCenter(JavaRDD<Vector> parsedInputPoints, Vector[] C, Integer L){
+    public static Map<Vector, Long> mapClusterSizesToCenter(JavaRDD<Vector> parsedInputPoints, Vector[] C, Integer L){
         Random randomGenerator = new Random();
-        JavaPairRDD<Vector, Integer> N = parsedInputPoints.flatMapToPair(point ->{
-            HashMap<Vector, Integer> counts = new HashMap<>();
-            ArrayList<Tuple2<Vector, Integer>> pairs = new ArrayList<>();
+        JavaPairRDD<Vector, Long> N = parsedInputPoints.flatMapToPair(point ->{
+            HashMap<Vector, Long> counts = new HashMap<>();
+            ArrayList<Tuple2<Vector, Long>> pairs = new ArrayList<>();
             double minDistance = Double.MAX_VALUE;
             Vector minC = Vectors.zeros(C.length);
             for (Vector c : C) {
@@ -57,41 +53,41 @@ class methodsHW1{
                     minC = c;
                 }
             }
-            counts.put(minC, 1 + counts.getOrDefault(minC, 0)); // TODO remove HashMap
-            for (Map.Entry<Vector, Integer> e : counts.entrySet()) {
+            counts.put(minC, 1L + counts.getOrDefault(minC, 0L));
+            for (Map.Entry<Vector, Long> e : counts.entrySet()) {
                 pairs.add(new Tuple2<>(e.getKey(), e.getValue()));
             }
             return pairs.iterator();
-        }).groupBy((wordcountpair) -> randomGenerator.nextInt(L))
+        }).groupBy((wordCountPair) -> randomGenerator.nextInt(L))
         .flatMapToPair(element ->{
-            HashMap<Vector, Integer> counts = new HashMap<>();
-            for (Tuple2<Vector, Integer> c : element._2()) { // TODO convert ALL integers of flatMapToPair to Long and all 0,1 to 0L, 1L
-                counts.put(c._1(), c._2() + counts.getOrDefault(c._1(), 0)); // in sostanza aggrega tutte le frequenze della parola i dei documenti nella stessa partizione
+            HashMap<Vector, Long> counts = new HashMap<>();
+            for (Tuple2<Vector, Long> c : element._2()) {
+                counts.put(c._1(), c._2() + counts.getOrDefault(c._1(), 0L));
             }
-            ArrayList<Tuple2<Vector, Integer>> pairs = new ArrayList<>();
-            for (Map.Entry<Vector, Integer> e : counts.entrySet()) {
+            ArrayList<Tuple2<Vector, Long>> pairs = new ArrayList<>();
+            for (Map.Entry<Vector, Long> e : counts.entrySet()) {
                 pairs.add(new Tuple2<>(e.getKey(), e.getValue()));
             }
             return pairs.iterator();
         })
-        .reduceByKey((x, y) -> x+y);
+        .reduceByKey(Long::sum);
         return N.collectAsMap();
     }
 
     public static void MRPrintStatistics(JavaRDD<String> inputPoints, Vector[] C, Integer L){
-        JavaRDD<String> inputPointsA = inputPoints.filter(row -> row.endsWith("A")); // TODO: re-utilize filtering done in main?
+        JavaRDD<String> inputPointsA = inputPoints.filter(row -> row.endsWith("A"));
         JavaRDD<Vector> parsedInputPointsA = conversion(inputPointsA);
 
         JavaRDD<String> inputPointsB = inputPoints.filter(row -> row.endsWith("B"));
         JavaRDD<Vector> parsedInputPointsB = conversion(inputPointsB);
 
-        Map<Vector, Integer> NA2 = mapClusterSizesToCenter(parsedInputPointsA, C, L);
-        Map<Vector, Integer> NB2 = mapClusterSizesToCenter(parsedInputPointsB, C, L);
+        Map<Vector, Long> NA2 = mapClusterSizesToCenter(parsedInputPointsA, C, L);
+        Map<Vector, Long> NB2 = mapClusterSizesToCenter(parsedInputPointsB, C, L);
 
         double[] centerCoordinates;
         for(int i=0; i<C.length; i++){
             centerCoordinates = C[i].toArray();
-            System.out.println("i = " + i + ", center = (" +  String.format("%.6f", centerCoordinates[0]) + " " + String.format("%.6f", centerCoordinates[1]) + "), NA" + i + "= " + NA2.getOrDefault(C[i], 0) + ", NB" + i + "= " + NB2.getOrDefault(C[i], 0));
+            System.out.println("i = " + i + ", center = (" +  String.format("%.6f", centerCoordinates[0]) + " " + String.format("%.6f", centerCoordinates[1]) + "), NA" + i + "= " + NA2.getOrDefault(C[i], 0L) + ", NB" + i + "= " + NB2.getOrDefault(C[i], 0L));
         }
     }
 
@@ -111,7 +107,7 @@ class methodsHW1{
 }
 
 public class G13HW1 {
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
         if (args.length != 4) {
             throw new IllegalArgumentException("USAGE: file_path L K M");
         }
@@ -141,11 +137,6 @@ public class G13HW1 {
 
         KMeansModel clusters = KMeans.train(parsedInputPoints.rdd(), K, M);
         Vector[] C = clusters.clusterCenters();
-        /*Vector[] C = new Vector[4];
-        C[0] = Vectors.dense(40.749035, -73.984431);
-        C[1] = Vectors.dense(40.873440,-74.192170);
-        C[2] = Vectors.dense(40.693363,-74.178147);
-        C[3] = Vectors.dense(40.746095,-73.830627);*/
 
         double delta = methodsHW1.MRComputeStandardObjective(parsedInputPoints, C);
         System.out.println("Delta(U, C) = " + String.format("%.6f", delta));
