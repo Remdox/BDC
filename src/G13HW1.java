@@ -87,7 +87,7 @@ class methodsHW1{
         double[] centerCoordinates;
         for(int i=0; i<C.length; i++){
             centerCoordinates = C[i].toArray();
-            System.out.println("i = " + i + ", center = (" +  String.format("%.6f", centerCoordinates[0]) + " " + String.format("%.6f", centerCoordinates[1]) + "), NA" + i + "= " + NA2.getOrDefault(C[i], 0L) + ", NB" + i + "= " + NB2.getOrDefault(C[i], 0L));
+            System.out.println("i = " + i + ", center = (" +  String.format("%.6f", centerCoordinates[0]) + ", " + String.format("%.6f", centerCoordinates[1]) + "), NA" + i + "= " + NA2.getOrDefault(C[i], 0L) + ", NB" + i + "= " + NB2.getOrDefault(C[i], 0L));
         }
     }
 
