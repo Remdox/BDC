@@ -1,3 +1,4 @@
+import org.apache.datasketches.memory.Memory;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.apache.spark.SparkConf;
@@ -8,27 +9,27 @@ import org.apache.spark.mllib.clustering.KMeans;
 import org.apache.spark.mllib.clustering.KMeansModel;
 import org.apache.spark.mllib.linalg.Vector;
 import org.apache.spark.mllib.linalg.*;
+import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
 import java.util.*;
 import java.lang.*;
 
 class methodsHW2{
     public static void MRFairLloyd(JavaRDD<String> inputPoints, Integer K, Integer M){
-        JavaRDD<Vector> parsedInputPoints = conversion(inputPoints);
-        KMeansModel clusters = KMeans.train(parsedInputPoints.rdd(), K, 0);
+        JavaRDD<Tuple2<Vector, String>> parsedInputPoints = conversionWithGroups(inputPoints).persist(StorageLevel.MEMORY_ONLY_SER()); // TODO: fare una prova sul tempo che ci mette con caching serializzato
+        KMeansModel clusters = KMeans.train(parsedInputPoints.map(Tuple2::_1).rdd(), K, 0);
         Vector[] C = clusters.clusterCenters();
-        JavaRDD<String> inputPointsA = inputPoints.filter(row -> row.endsWith("A"));
-        JavaRDD<Vector> parsedInputPointsA = conversion(inputPointsA);
-        JavaRDD<String> inputPointsB = inputPoints.filter(row -> row.endsWith("B"));
-        JavaRDD<Vector> parsedInputPointsB = conversion(inputPointsB);
 
-        for(int i = 0; i < M; i++){
-            JavaPairRDD<Vector, Iterable<Vector>> clusterPair = parsedInputPoints.mapToPair(point -> {
-                int clusterIndex = clusters.predict(point);
+        for(int i = 0; i < M; i++){ // M iterations of Fair K-Means Clustering
+            JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster = parsedInputPoints.mapToPair(point -> {
+                int clusterIndex = clusters.predict(point._1()); // returns index of the corresponding cluster that includes the point
                 Vector centroid = C[clusterIndex];
-                return new Tuple2<>(centroid, point);
-                
-            }).groupByKey();
+                return new Tuple2<>(centroid, point); // returns a pair point-center of the corresponding cluster
+
+            }).groupByKey(); // groups points of the same cluster
+            JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A");
+            JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B");
+
 
             Vector[] centersA = {};
             Vector[] centersB = {};
@@ -36,6 +37,17 @@ class methodsHW2{
         }
 
     }
+
+    public static JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> getClustersOfGroup(JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster, String group) {
+        return pairsPointsToCluster.mapValues(cluster -> {
+            ArrayList<Tuple2<Vector, String>> groupPointsInCluster = new ArrayList<>();
+            for(Tuple2<Vector, String> tuple : cluster){
+                if(tuple._2().endsWith(group)) groupPointsInCluster.add(tuple);
+            }
+            return groupPointsInCluster;
+        });
+    }
+
 
     public static JavaRDD<Vector> conversion(JavaRDD<String> inputPoints){
         JavaRDD<Vector> parsedInputPoints = inputPoints.map(row -> {
@@ -45,6 +57,20 @@ class methodsHW2{
                 values[i] = Double.parseDouble(rowArray[i]);
             }
             return Vectors.dense(values);
+        });
+        parsedInputPoints.cache();
+
+        return parsedInputPoints;
+    }
+
+    public static JavaRDD<Tuple2<Vector, String>>  conversionWithGroups(JavaRDD<String> inputPoints){
+        JavaRDD<Tuple2<Vector, String>> parsedInputPoints = inputPoints.map(row -> {
+            String[] rowArray = row.split(",");
+            double[] values = new double[rowArray.length - 1];
+            for (int i = 0; i < rowArray.length - 1; i++) {
+                values[i] = Double.parseDouble(rowArray[i]);
+            }
+            return new Tuple2<>(Vectors.dense(values), rowArray[rowArray.length - 1]);
         });
         parsedInputPoints.cache();
 
