@@ -51,7 +51,8 @@ class methodsHW2{
             // l_i / ell
             JavaPairRDD<Integer, Double> euclNorm = getEuclideanNorm(groupMeansA, groupMeansB);
 
-            // fixedA = getTotalDistance(clustersGroupA, groupMeansA);
+            double fixedA = getTotalDistanceForEachCluster(clustersGroupA, groupMeansA);
+            double fixedB = getTotalDistanceForEachCluster(clustersGroupB, groupMeansB);
 
             Vector[] centersA = {};
             Vector[] centersB = {};
@@ -162,11 +163,11 @@ class methodsHW2{
 
     // this method was designed in HW1, but we actually needed the totalDistance for HW2, so we extracted that part into its own method
     public static double MRComputeStandardObjective(JavaRDD<Vector> parsedInputPoints, Vector[] C){
-        double totalDistance = getTotalDistance(parsedInputPoints, C);
+        double totalDistance = getTotalDistanceFromCenter(parsedInputPoints, C);
         return (1.0 / parsedInputPoints.count()) * totalDistance;
     }
 
-    private static double getTotalDistance(JavaRDD<Vector> parsedInputPoints, Vector[] C) {
+    private static double getTotalDistanceFromCenter(JavaRDD<Vector> parsedInputPoints, Vector[] C) {
         double totalDistance = parsedInputPoints.map(point -> {
             double minDistance = Double.MAX_VALUE;
             for (Vector c : C) {
@@ -180,6 +181,20 @@ class methodsHW2{
         return totalDistance;
     }
 
+    private static double getTotalDistanceForEachCluster(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroup, JavaPairRDD<Integer, Vector> means) {
+        double totalDistance = clustersGroup.cogroup(means).map(pair -> {
+            Iterable<Tuple2<Vector, String>> cluster = pair._2()._1().iterator().next();
+            Vector ithMean = pair._2()._2().iterator().next();
+
+            double ithTotDistanceFromClusters = 0;
+            for (Tuple2<Vector, String> point : cluster) {
+                Vector value = point._1();
+                ithTotDistanceFromClusters += Vectors.sqdist(value, ithMean);
+            }
+            return ithTotDistanceFromClusters;
+        }).reduce(Double::sum);
+        return totalDistance;
+    }
 
     public static double MRComputeFairObjective(JavaRDD<String> inputPoints, Vector[] C){
         JavaRDD<String> inputPointsA = inputPoints.filter(row -> row.endsWith("A"));
