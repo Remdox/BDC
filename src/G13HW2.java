@@ -15,6 +15,8 @@ import scala.Tuple2;
 import java.util.*;
 import java.lang.*;
 
+import static java.lang.Math.sqrt;
+
 class methodsHW2{
     public static void MRFairLloyd(JavaRDD<String> inputPoints, Integer K, Integer M){
         JavaRDD<Tuple2<Vector, String>> parsedInputPoints = conversionWithGroups(inputPoints).persist(StorageLevel.MEMORY_ONLY_SER()); // TODO: fare una prova sul tempo che ci mette con caching serializzato
@@ -30,13 +32,13 @@ class methodsHW2{
             // in this case, each cluster is a pair indexOfTheCluster-ListOfTuples, where each tuple is a point and its corresponding group
             JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster = parsedInputPoints.mapToPair(point -> {
                 return new Tuple2<>(clusters.predict(point._1()), point); // returns a pair point-index of the corresponding cluster
-            }).groupByKey(); // groups points of the same cluster (TODO may be better to make 2 rounds)
+            }).groupByKey(); // groups points of the same cluster (TODO may be inefficient?)
 
             JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A"); // cluster A
             JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B"); // cluster B
 
             JavaPairRDD<Integer, Double> clustersCountA = getClustersGroupCounts(clustersGroupA); // A ∩ U_i
-            JavaPairRDD<Integer, Double> clustersCountB = getClustersGroupCounts(clustersGroupA); // B ∩ U_i
+            JavaPairRDD<Integer, Double> clustersCountB = getClustersGroupCounts(clustersGroupB); // B ∩ U_i
 
             // α_i and β_i
             JavaPairRDD<Integer, Double> alphas = clustersCountA.mapToPair(item -> new Tuple2<>(item._1(), item._2() / countInputPointsA));
@@ -46,7 +48,10 @@ class methodsHW2{
             JavaPairRDD<Integer, Vector> groupMeansA = getMeansClusterGroup(clustersGroupA, countInputPointsA);
             JavaPairRDD<Integer, Vector> groupMeansB = getMeansClusterGroup(clustersGroupB, countInputPointsB);
 
-            JavaPairRDD<Integer, Vector> euclNorm = getEuclideanNorm(groupMeansA, groupMeansB);
+            // l_i / ell
+            JavaPairRDD<Integer, Double> euclNorm = getEuclideanNorm(groupMeansA, groupMeansB);
+
+            // fixedA = getTotalDistance(clustersGroupA, groupMeansA);
 
             Vector[] centersA = {};
             Vector[] centersB = {};
@@ -54,8 +59,16 @@ class methodsHW2{
         }
     }
 
-    private static JavaPairRDD<Integer, Vector> getEuclideanNorm(JavaPairRDD<Integer, Vector> groupMeansA, JavaPairRDD<Integer, Vector> groupMeansB) {
-        groupMeansA.
+    private static JavaPairRDD<Integer, Double> getEuclideanNorm(JavaPairRDD<Integer, Vector> groupMeansA, JavaPairRDD<Integer, Vector> groupMeansB) {
+        return groupMeansA.cogroup(groupMeansB).mapToPair(
+          groups -> {
+              Vector ithMeanA = groups._2()._1().iterator().next();
+              Vector ithMeanB = groups._2()._2().iterator().next();
+
+              Double euclideanNorm = sqrt(Vectors.sqdist(ithMeanA, ithMeanB));
+              return new Tuple2<>(groups._1(), euclideanNorm);
+          }
+        );
     }
 
     public static JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> getClustersOfGroup(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster, String group) {
@@ -147,8 +160,14 @@ class methodsHW2{
         return xDist;
     }
 
+    // this method was designed in HW1, but we actually needed the totalDistance for HW2, so we extracted that part into its own method
     public static double MRComputeStandardObjective(JavaRDD<Vector> parsedInputPoints, Vector[] C){
-        double totalDistance = parsedInputPoints.map( point -> {
+        double totalDistance = getTotalDistance(parsedInputPoints, C);
+        return (1.0 / parsedInputPoints.count()) * totalDistance;
+    }
+
+    private static double getTotalDistance(JavaRDD<Vector> parsedInputPoints, Vector[] C) {
+        double totalDistance = parsedInputPoints.map(point -> {
             double minDistance = Double.MAX_VALUE;
             for (Vector c : C) {
                 double distance = Vectors.sqdist(point, c);
@@ -158,8 +177,9 @@ class methodsHW2{
             }
             return minDistance;
         }).reduce(Double::sum);
-        return (1.0 / parsedInputPoints.count()) * totalDistance;
+        return totalDistance;
     }
+
 
     public static double MRComputeFairObjective(JavaRDD<String> inputPoints, Vector[] C){
         JavaRDD<String> inputPointsA = inputPoints.filter(row -> row.endsWith("A"));
