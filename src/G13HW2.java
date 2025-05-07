@@ -1,6 +1,7 @@
 import org.apache.datasketches.memory.Memory;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
+import org.apache.orc.OrcProto;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
@@ -19,26 +20,45 @@ class methodsHW2{
         JavaRDD<Tuple2<Vector, String>> parsedInputPoints = conversionWithGroups(inputPoints).persist(StorageLevel.MEMORY_ONLY_SER()); // TODO: fare una prova sul tempo che ci mette con caching serializzato
         KMeansModel clusters = KMeans.train(parsedInputPoints.map(Tuple2::_1).rdd(), K, 0);
         Vector[] C = clusters.clusterCenters();
+        Long countInputPointsA = parsedInputPoints.filter(point -> point._2().endsWith("A")).count();
+        Long countInputPointsB = parsedInputPoints.filter(point -> point._2().endsWith("B")).count();
 
-        for(int i = 0; i < M; i++){ // M iterations of Fair K-Means Clustering
-            JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster = parsedInputPoints.mapToPair(point -> {
-                int clusterIndex = clusters.predict(point._1()); // returns index of the corresponding cluster that includes the point
-                Vector centroid = C[clusterIndex];
-                return new Tuple2<>(centroid, point); // returns a pair point-center of the corresponding cluster
+        // M iterations of Fair K-Means Clustering
+        for(int i = 0; i < M; i++){
 
-            }).groupByKey(); // groups points of the same cluster
-            JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A");
-            JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B");
+            // after finding the centers, apply Lloyd to associate the clusters with their centers
+            // in this case, each cluster is a pair indexOfTheCluster-ListOfTuples, where each tuple is a point and its corresponding group
+            JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster = parsedInputPoints.mapToPair(point -> {
+                return new Tuple2<>(clusters.predict(point._1()), point); // returns a pair point-index of the corresponding cluster
+            }).groupByKey(); // groups points of the same cluster (TODO may be better to make 2 rounds)
 
+            JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A"); // cluster A
+            JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B"); // cluster B
+
+            JavaPairRDD<Integer, Double> clustersCountA = getClustersGroupCounts(clustersGroupA); // A ∩ U_i
+            JavaPairRDD<Integer, Double> clustersCountB = getClustersGroupCounts(clustersGroupA); // B ∩ U_i
+
+            // α_i and β_i
+            JavaPairRDD<Integer, Double> alphas = clustersCountA.mapToPair(item -> new Tuple2<>(item._1(), item._2() / countInputPointsA));
+            JavaPairRDD<Integer, Double> betas = clustersCountB.mapToPair(item -> new Tuple2<>(item._1(), item._2() / countInputPointsB));
+
+            // μ_i
+            JavaPairRDD<Integer, Vector> groupMeansA = getMeansClusterGroup(clustersGroupA, countInputPointsA);
+            JavaPairRDD<Integer, Vector> groupMeansB = getMeansClusterGroup(clustersGroupB, countInputPointsB);
+
+            JavaPairRDD<Integer, Vector> euclNorm = getEuclideanNorm(groupMeansA, groupMeansB);
 
             Vector[] centersA = {};
             Vector[] centersB = {};
 
         }
-
     }
 
-    public static JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> getClustersOfGroup(JavaPairRDD<Vector, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster, String group) {
+    private static JavaPairRDD<Integer, Vector> getEuclideanNorm(JavaPairRDD<Integer, Vector> groupMeansA, JavaPairRDD<Integer, Vector> groupMeansB) {
+        groupMeansA.
+    }
+
+    public static JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> getClustersOfGroup(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster, String group) {
         return pairsPointsToCluster.mapValues(cluster -> {
             ArrayList<Tuple2<Vector, String>> groupPointsInCluster = new ArrayList<>();
             for(Tuple2<Vector, String> tuple : cluster){
@@ -46,6 +66,33 @@ class methodsHW2{
             }
             return groupPointsInCluster;
         });
+    }
+
+    private static JavaPairRDD<Integer, Double> getClustersGroupCounts(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroup) {
+        JavaPairRDD<Integer, Double> counts = clustersGroup.mapToPair(pair -> {
+            Integer count = 0;
+            for (Tuple2<Vector, String> tuple : pair._2()) {
+                count++;
+            }
+            return new Tuple2<>(pair._1(), new Double(count));
+        });
+        return counts;
+    }
+
+    private static JavaPairRDD<Integer, Vector> getMeansClusterGroup(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroup, Long groupCount) {
+        JavaPairRDD<Integer, Vector> clustersMeans = clustersGroup.mapToPair(clusterPair -> {
+            double[] sum = {};
+            for (Tuple2<Vector, String> tuple : clusterPair._2()) {
+                double[] point = tuple._1().toArray();
+                if(sum.length == 0) sum = new double[point.length];
+                else for(int i = 0; i < point.length; i++) sum[i] += point[i];
+            }
+            double[] mean = new double[sum.length];
+            for(int i = 0; i < sum.length; i++) mean[i] = sum[i] / groupCount;
+            Vector ithMean = Vectors.dense(mean);
+            return new Tuple2<>(clusterPair._1(), ithMean);
+        });
+        return clustersMeans;
     }
 
 
