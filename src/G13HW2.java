@@ -1,9 +1,6 @@
-import org.apache.datasketches.memory.Memory;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
-import org.apache.orc.OrcProto;
 import org.apache.spark.SparkConf;
-import org.apache.spark.api.java.JavaDoubleRDD;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -11,12 +8,48 @@ import org.apache.spark.mllib.clustering.KMeans;
 import org.apache.spark.mllib.clustering.KMeansModel;
 import org.apache.spark.mllib.linalg.Vector;
 import org.apache.spark.mllib.linalg.*;
-import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
 import java.util.*;
 import java.lang.*;
 
 import static java.lang.Math.sqrt;
+
+public class G13HW2 {
+
+    public static void main(String[] args) {
+        if (args.length != 4) {
+            throw new IllegalArgumentException("USAGE: file_path L K M");
+        }
+
+        Logger.getLogger("org").setLevel(Level.OFF);
+        Logger.getLogger("akka").setLevel(Level.OFF);
+        SparkConf conf = new SparkConf(true).setAppName("G13HW1");
+        JavaSparkContext sc = new JavaSparkContext(conf);
+        sc.setLogLevel("OFF");
+
+        System.out.println("Input file = " + args[0] + ", L = " + args[1] + ", K = " + args[2] + ", M = " + args[3]);
+        int L = Integer.parseInt(args[1]);
+        int K = Integer.parseInt(args[2]);
+        int M = Integer.parseInt(args[3]);
+
+        // partition the points into L random partitions for the MapReduce algorithm used later in MRPrintStatistics
+        JavaRDD<String> inputPoints = sc.textFile(args[0]).repartition(L).cache();
+
+        // as requested, we count the sizes of the two groups
+        long N = inputPoints.count();
+        long NA = inputPoints.filter(row -> row.endsWith("A")).count();
+        long NB = inputPoints.filter(row -> row.endsWith("B")).count();
+        System.out.println("N = " + N + ", NA= " + NA + ", NB = " + NB);
+
+        // as requested, we first convert the strings given as input into Vector points
+        JavaRDD<Vector> parsedInputPoints = methodsHW2.conversion(inputPoints);
+
+        KMeansModel clusters = KMeans.train(parsedInputPoints.rdd(), K, M);
+        Vector[] C_stand = clusters.clusterCenters();
+
+        methodsHW2.MRFairLloyd(inputPoints, K, M);
+    }
+}
 
 class methodsHW2{
     public static List<Vector> MRFairLloyd(JavaRDD<String> inputPoints, Integer K, Integer M){
@@ -31,55 +64,62 @@ class methodsHW2{
             System.out.println("Iteration n."+i);
             // applying Lloyd to associate the clusters with their centers
             // in this case, each cluster is a pair indexOfTheCluster-ListOfTuples, where each tuple is a point and its corresponding group
-            if(centers.isEmpty()) clusters = KMeans.train(parsedInputPoints.map(Tuple2::_1).rdd(), K, 0);
+            if(centers.isEmpty()){
+                clusters = KMeans.train(parsedInputPoints.map(Tuple2::_1).rdd(), K, 0);
+                centers = Arrays.asList(clusters.clusterCenters());
+            }
             else clusters = new KMeansModel(centers);
+
+            for(int k=0; k < centers.size(); k++){
+                System.out.println("center"+k+": "+ centers.get(k));
+            }
+
             KMeansModel finalClusters = clusters;
             JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster = parsedInputPoints.mapToPair(point -> {
                 return new Tuple2<>(finalClusters.predict(point._1()), point); // returns a pair point-index of the corresponding cluster
             }).groupByKey(); // groups points of the same cluster (TODO may be inefficient?)
 
-            /*pairsPointsToCluster.foreach(cluster -> {
+            pairsPointsToCluster.foreach(cluster -> {
                 Integer clusterIndex = cluster._1(); // Indice come Integer
                 Iterable<Tuple2<Vector, String>> points = cluster._2();
                 System.out.println("\nCluster index (Integer): " + clusterIndex);
                 // Stampa solo i primi 5 valori del cluster
                 int counter = 0;
                 for (Tuple2<Vector, String> point : points) {
-                    if (counter >= 5) break; // Limita a 5 punti
-                    System.out.println("  Punto " + (counter + 1) + ": " + point._1() + " | Etichetta: " + point._2());
+                    if (counter >= 3) break; // Limita a 5 punti
+                    System.out.println("  Punto " + (counter) + ": " + point._1() + " | Etichetta: " + point._2());
                     counter++;
                 }
-            });*/
+            });
 
-            JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A"); // cluster A
-            JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B"); // cluster B
+            JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A"); // cluster A
+            JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B"); // cluster B
 
-            /*clustersGroupA.foreach(cluster -> {
-                Integer clusterIndex = cluster._1(); // Indice come Integer
-                Iterable<Tuple2<Vector, String>> points = cluster._2();
-                System.out.println("\nCluster index (Integer): " + clusterIndex);
-                // Stampa solo i primi 5 valori del cluster
-                int counter = 0;
-                for (Tuple2<Vector, String> point : points) {
-                    if (counter >= 5) break; // Limita a 5 punti
-                    System.out.println("  Punto " + (counter + 1) + ": " + point._1() + " | Etichetta: " + point._2());
-                    counter++;
-                }
-            });*/
-
-            JavaPairRDD<Integer, Double> clustersCountA = getClustersGroupCounts(clustersGroupA); // A ∩ U_i
-            JavaPairRDD<Integer, Double> clustersCountB = getClustersGroupCounts(clustersGroupB); // B ∩ U_i
+            JavaPairRDD<Integer, Double> clustersCountA = getClustersGroupCounts(clustersGroupA); // | A ∩ U_i |
+            JavaPairRDD<Integer, Double> clustersCountB = getClustersGroupCounts(clustersGroupB); // | B ∩ U_i |
 
             // α_i and β_i
             JavaPairRDD<Integer, Double> alphas = clustersCountA.mapToPair(item -> new Tuple2<>(item._1(), item._2() / countInputPointsA));
             JavaPairRDD<Integer, Double> betas = clustersCountB.mapToPair(item -> new Tuple2<>(item._1(), item._2() / countInputPointsB));
-            /*betas.take(5).forEach(beta ->
+            betas.take(5).forEach(beta ->
                     System.out.println("Beta - Cluster: " + beta._1() + " | Valore: " + beta._2())
-            );*/
+            );
 
             // μ_i
             JavaPairRDD<Integer, Vector> groupMeansA = getMeansClusterGroup(clustersGroupA, countInputPointsA);
             JavaPairRDD<Integer, Vector> groupMeansB = getMeansClusterGroup(clustersGroupB, countInputPointsB);
+            /*groupMeansA.take(5).forEach(pair -> {
+                int clusterId = pair._1();
+                Vector vector = pair._2();
+
+                System.out.print("Means cluster" + clusterId + ": [");
+                for (int k = 0; k < Math.min(5, vector.size()); k++) {
+                    System.out.print(vector.apply(k));
+                    if (k < Math.min(5, vector.size()) - 1) System.out.print(", ");
+                }
+                System.out.println("]");
+            });*/
+
 
             // l_i/ell
             JavaPairRDD<Integer, Double> euclNorm = getEuclideanNorm(groupMeansA, groupMeansB);
@@ -89,14 +129,18 @@ class methodsHW2{
             double fixedA = getTotalDistanceForEachCluster(clustersGroupA, groupMeansA);
             double fixedB = getTotalDistanceForEachCluster(clustersGroupB, groupMeansB);
 
-            double[] betasValues = convertToArray(betas);
-            double[] alphasValues = convertToArray(alphas);
-            double[] ellValues = convertToArray(euclNorm);
+            double[] betasValues = convertToArray(betas, K);
+            double[] alphasValues = convertToArray(alphas, K);
+            double[] ellValues = convertToArray(euclNorm, K);
             for(int k=0; k < ellValues.length; k++){
-                System.out.println(ellValues[k]);
+                System.out.println("l"+k+": "+ ellValues[k]);
             }
 
             double[] x = computeVectorX(fixedA, fixedB, alphasValues, betasValues, ellValues, K);
+            /*for(int k=0; k < x.length; k++){
+                System.out.println("x"+k+": "+ x[k]);
+            }*/
+
 
             JavaRDD<Vector> centersRDD = computeFairCenters(ellValues, x, groupMeansA, groupMeansB);
             centers = centersRDD.collect();
@@ -104,13 +148,21 @@ class methodsHW2{
         return centers;
     }
 
-    private static double[] convertToArray(JavaPairRDD<Integer, Double> startRDD) {
-        JavaDoubleRDD valuesRDD = startRDD.mapToDouble(Tuple2::_2);
-        List<Double> valuesList = valuesRDD.collect();
+    private static double[] convertToArray(JavaPairRDD<Integer, Double> startRDD, int K) {
+        Map<Integer, Double> clusterValues = startRDD.collectAsMap();
+        double[] result = new double[K];
 
-        double[] destArray = new double[valuesList.size()];
-        for (int i = 0; i < valuesList.size(); i++) destArray[i] = valuesList.get(i);
-        return destArray;
+        // Initialize with default values
+        Arrays.fill(result, 0.0);
+
+        // Fill existing clusters
+        clusterValues.forEach((clusterId, value) -> {
+            if (clusterId >= 0 && clusterId < K) {
+                result[clusterId] = value;
+            }
+        });
+
+        return result;
     }
 
     private static Vector convertToVector(JavaRDD<Vector> centers) {
@@ -133,27 +185,27 @@ class methodsHW2{
 
     private static JavaPairRDD<Integer, Double> getEuclideanNorm(JavaPairRDD<Integer, Vector> groupMeansA, JavaPairRDD<Integer, Vector> groupMeansB) {
         return groupMeansA.join(groupMeansB).mapToPair(
-          groups -> {
-              Vector ithMeanA = groups._2()._1();
-              Vector ithMeanB = groups._2()._2();
+                groups -> {
+                    Vector ithMeanA = groups._2()._1();
+                    Vector ithMeanB = groups._2()._2();
 
-              Double euclideanNorm = sqrt(Vectors.sqdist(ithMeanA, ithMeanB));
-              return new Tuple2<>(groups._1(), euclideanNorm);
-          }
+                    Double euclideanNorm = sqrt(Vectors.sqdist(ithMeanA, ithMeanB));
+                    return new Tuple2<>(groups._1(), euclideanNorm);
+                }
         );
     }
 
-    public static JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> getClustersOfGroup(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster, String group) {
+    public static JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> getClustersOfGroup(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster, String group) {
         return pairsPointsToCluster.mapValues(cluster -> {
             ArrayList<Tuple2<Vector, String>> groupPointsInCluster = new ArrayList<>();
             for(Tuple2<Vector, String> tuple : cluster){
                 if(tuple._2().endsWith(group)) groupPointsInCluster.add(tuple);
             }
             return groupPointsInCluster;
-        });
+        }).sortByKey();
     }
 
-    private static JavaPairRDD<Integer, Double> getClustersGroupCounts(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroup) {
+    private static JavaPairRDD<Integer, Double> getClustersGroupCounts(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroup) {
         JavaPairRDD<Integer, Double> counts = clustersGroup.mapToPair(pair -> {
             long count = 0L;
             for (Tuple2<Vector, String> tuple : pair._2()) {
@@ -164,7 +216,7 @@ class methodsHW2{
         return counts;
     }
 
-    private static JavaPairRDD<Integer, Vector> getMeansClusterGroup(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroup, Long groupCount) {
+    private static JavaPairRDD<Integer, Vector> getMeansClusterGroup(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroup, Long groupCount) {
         JavaPairRDD<Integer, Vector> clustersMeans = clustersGroup.mapToPair(clusterPair -> {
             double[] sum = {};
             for (Tuple2<Vector, String> cluster : clusterPair._2()) {
@@ -270,7 +322,7 @@ class methodsHW2{
         return totalDistance;
     }
 
-    private static double getTotalDistanceForEachCluster(JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> clustersGroup, JavaPairRDD<Integer, Vector> means) {
+    private static double getTotalDistanceForEachCluster(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroup, JavaPairRDD<Integer, Vector> means) {
         double totalDistance = clustersGroup.join(means).map(pair -> {
             Iterable<Tuple2<Vector, String>> cluster = pair._2()._1();
             Vector ithMean = pair._2()._2();
@@ -295,41 +347,5 @@ class methodsHW2{
         double deltaB = MRComputeStandardObjective(parsedInputPointsB, C);
 
         return Double.max(deltaA, deltaB);
-    }
-}
-
-public class G13HW2 {
-    public static void main(String[] args) {
-        if (args.length != 4) {
-            throw new IllegalArgumentException("USAGE: file_path L K M");
-        }
-
-        Logger.getLogger("org").setLevel(Level.OFF);
-        Logger.getLogger("akka").setLevel(Level.OFF);
-        SparkConf conf = new SparkConf(true).setAppName("G13HW1");
-        JavaSparkContext sc = new JavaSparkContext(conf);
-        sc.setLogLevel("OFF");
-
-        System.out.println("Input file = " + args[0] + ", L = " + args[1] + ", K = " + args[2] + ", M = " + args[3]);
-        int L = Integer.parseInt(args[1]);
-        int K = Integer.parseInt(args[2]);
-        int M = Integer.parseInt(args[3]);
-
-        // partition the points into L random partitions for the MapReduce algorithm used later in MRPrintStatistics
-        JavaRDD<String> inputPoints = sc.textFile(args[0]).repartition(L).cache();
-
-        // as requested, we count the sizes of the two groups
-        long N = inputPoints.count();
-        long NA = inputPoints.filter(row -> row.endsWith("A")).count();
-        long NB = inputPoints.filter(row -> row.endsWith("B")).count();
-        System.out.println("N = " + N + ", NA= " + NA + ", NB = " + NB);
-
-        // as requested, we first convert the strings given as input into Vector points
-        JavaRDD<Vector> parsedInputPoints = methodsHW2.conversion(inputPoints);
-
-        KMeansModel clusters = KMeans.train(parsedInputPoints.rdd(), K, M);
-        Vector[] C_stand = clusters.clusterCenters();
-
-        methodsHW2.MRFairLloyd(inputPoints, K, M);
     }
 }
