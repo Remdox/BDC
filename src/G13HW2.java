@@ -50,6 +50,7 @@ public class G13HW2 {
         long end = System.currentTimeMillis();
         long time_C_stand = end-start;
 
+        // IMPORTANT NOTE: The clusters found by C_stand could have different indices than C_fair even if they are the same
         start = System.currentTimeMillis();
         Vector[] C_fair = methodsHW2.MRFairLloyd(inputPoints, K, M);
         end = System.currentTimeMillis();
@@ -69,14 +70,13 @@ public class G13HW2 {
         System.out.println("Time to compute fair centers = " + time_C_fair + " ms");
         System.out.println("Time to compute objective with standard centers = " + time_phi_stand + " ms");
         System.out.println("Time to compute objective with fair centers = " + time_phi_fair + " ms");
-
-
     }
 }
 
 class methodsHW2{
     public static Vector[] MRFairLloyd(JavaRDD<String> inputPoints, int K, int M){
         JavaRDD<Tuple2<Vector, String>> parsedInputPoints = conversionWithGroups(inputPoints);
+        int d = getPointsDimensionality(parsedInputPoints);
         long countInputPointsA = parsedInputPoints.filter(point -> point._2().endsWith("A")).count(); // | A |
         long countInputPointsB = parsedInputPoints.filter(point -> point._2().endsWith("B")).count(); // | B |
 
@@ -103,28 +103,29 @@ class methodsHW2{
             long[] clustersCountB = getClustersGroupCounts(clustersGroupB, K); // | B ∩ U_i |
 
             // α_i and β_i
-            double[] alphas = getGroupFrequencyInClusters(clustersCountA, countInputPointsA);
-            double[] betas = getGroupFrequencyInClusters(clustersCountB, countInputPointsB);
+            double[] alphas = getGroupPartialCounts(clustersCountA, countInputPointsA);
+            double[] betas = getGroupPartialCounts(clustersCountB, countInputPointsB);
 
             // M^A and M^B
-            Vector[] groupMeansA = getMeansClusterGroup(clustersGroupA, clustersCountA, K);
-            Vector[] groupMeansB = getMeansClusterGroup(clustersGroupB, clustersCountB, K);
+            Tuple2<Vector[], Vector[]> groupCentroids = getGroupsCentroids(clustersGroupA, clustersGroupB, clustersCountA, clustersCountB, K, d);
+            Vector[] groupCentroidA = groupCentroids._1();
+            Vector[] groupCentroidB = groupCentroids._2();
 
             // ell
-            double[] euclNorms = getEuclideanNorms(groupMeansA, groupMeansB, K);
+            double[] euclNorms = getEuclideanNorms(groupCentroidA, groupCentroidB, K, alphas, betas);
 
             // prepare parameters for computeVectorX, which is used as-is from the HW
-            double fixedA = getTotalDistanceForEachCluster(clustersGroupA, groupMeansA)/countInputPointsA;
-            double fixedB = getTotalDistanceForEachCluster(clustersGroupB, groupMeansB)/countInputPointsB;
+            double fixedA = getTotalDistanceForEachCluster(clustersGroupA, groupCentroidA)/countInputPointsA;
+            double fixedB = getTotalDistanceForEachCluster(clustersGroupB, groupCentroidB)/countInputPointsB;
 
             double[] x = computeVectorX(fixedA, fixedB, alphas, betas, euclNorms, K);
 
-            centers = computeFairCenters(euclNorms, x, groupMeansA, groupMeansB);
+            centers = computeFairCenters(euclNorms, x, groupCentroidA, groupCentroidB, d);
         }
         return centers;
     }
 
-    private static double[] getGroupFrequencyInClusters(long[] clustersCountA, long countInputPointsA) {
+    private static double[] getGroupPartialCounts(long[] clustersCountA, long countInputPointsA) {
         double result[] = new double[clustersCountA.length];
         for(int i=0; i<clustersCountA.length; i++){
             result[i] = (double) clustersCountA[i] /countInputPointsA;
@@ -132,20 +133,7 @@ class methodsHW2{
         return result;
     }
 
-    private static double[] convertToDoubleArray(JavaPairRDD<Integer, Double> startRDD, int K) {
-        Map<Integer, Double> clusterValues = startRDD.collectAsMap();
-        double[] result = new double[K];
-
-        Arrays.fill(result, -1.69);
-        clusterValues.forEach((clusterId, value) -> {
-            if (clusterId >= 0 && clusterId < K) {
-                result[clusterId] = value;
-            }
-        });
-        return result;
-    }
-
-    private static Vector[] convertToVectorArray(JavaPairRDD<Integer, Vector> startRDD, int K) {
+    private static Vector[] convertToVectorArray(JavaPairRDD<Integer, Vector> startRDD, int K, int d) {
         Map<Integer, Vector> clusterVectors = startRDD.collectAsMap();
         Vector[] result = new Vector[K];
 
@@ -159,7 +147,7 @@ class methodsHW2{
         Map<Integer, Long> clusterValues = startRDD.collectAsMap();
         long[] result = new long[K];
 
-        Arrays.fill(result, 690000); // TODO: da togliere - Sveva
+        Arrays.fill(result, 690000);
         clusterValues.forEach((clusterId, value) -> {
             result[clusterId] = value;
         });
@@ -167,13 +155,11 @@ class methodsHW2{
     }
 
 
-    private static double[] getEuclideanNorms(Vector[] groupMeansA, Vector[] groupMeansB, int K) {
+    private static double[] getEuclideanNorms(Vector[] groupCentroidA, Vector[] groupCentroidB, int K, double[] alphas, double[] betas) {
         double[] norms = new double[K];
         Arrays.fill(norms, 0.0);
 
-        for (int i = 0; i < K; i++) {
-            norms[i] = sqrt(Vectors.sqdist(groupMeansA[i], groupMeansB[i]));
-        }
+        for (int i = 0; i < K; i++) norms[i] = sqrt(Vectors.sqdist(groupCentroidA[i], groupCentroidB[i]));
         return norms;
     }
 
@@ -198,8 +184,24 @@ class methodsHW2{
         return convertToLongArray(counts, K);
     }
 
+    private static Tuple2<Vector[], Vector[]> getGroupsCentroids(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupA, JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupB, long[] clustersGroupCountsA, long[] clustersGroupCountsB, int K, int d){
+        Vector[] groupCentroidA = getCentroidsGroupedClusters(clustersGroupA, clustersGroupCountsA, K, d);
+        Vector[] groupCentroidB = getCentroidsGroupedClusters(clustersGroupB, clustersGroupCountsB, K, d);
+        // check size of each vector and set the empty ones to the one of the other group, so that ell is = 0
+        for(int i = 0; i < groupCentroidA.length; i++){
+            if(groupCentroidA[i].size() == 0){
+                groupCentroidA[i] = groupCentroidB[i];
+            }
+        }
+        for(int i = 0; i < groupCentroidB.length; i++){
+            if(groupCentroidB[i].size() == 0){
+                groupCentroidB[i] = groupCentroidA[i];
+            }
+        }
+        return new Tuple2<>(groupCentroidA, groupCentroidB);
+    }
 
-    private static Vector[] getMeansClusterGroup(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroup, long[] clustersGroupCounts, int K) {
+    private static Vector[] getCentroidsGroupedClusters(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroup, long[] clustersGroupCounts, int K, int d) {
         JavaPairRDD<Integer, Vector> clustersMeans = clustersGroup.mapToPair(clusterPair -> {
             double[] sum = {};
             for (Tuple2<Vector, String> point : clusterPair._2()) {
@@ -208,18 +210,19 @@ class methodsHW2{
                     sum = new double[pointComponents.length];
                     Arrays.fill(sum, 0.0);
                 }
+                // sum each component of each element and save the summed components in sum
                 for(int i = 0; i < pointComponents.length; i++) sum[i] += pointComponents[i];
             }
-            double[] mean = new double[sum.length];
+            double[] centroid = new double[sum.length];
             int clusterId = clusterPair._1();
-            // compute the mean for each component of the sum vector
+            // compute the centroid for each component of the sum vector
             for(int i = 0; i < sum.length; i++){
-                mean[i] = sum[i] / clustersGroupCounts[clusterId];
+                centroid[i] = sum[i] / clustersGroupCounts[clusterId];
             }
-            Vector ithMean = Vectors.dense(mean);
-            return new Tuple2<>(clusterId, ithMean);
+            Vector ithCentroid = Vectors.dense(centroid);
+            return new Tuple2<>(clusterId, ithCentroid);
         });
-        return convertToVectorArray(clustersMeans, K);
+        return convertToVectorArray(clustersMeans, K, d);
     }
 
 
@@ -251,6 +254,13 @@ class methodsHW2{
         return parsedInputPoints;
     }
 
+    private static int getPointsDimensionality(JavaRDD<Tuple2<Vector, String>> parsedInputPoints){
+        return parsedInputPoints.map(row ->{
+           Vector point = row._1();
+           return point.size();
+        }).reduce(Math::max);
+    }
+
     public static double[] computeVectorX(double fixedA, double fixedB, double[] alpha, double[] beta, double[] ell, int K) {
         double gamma = 0.5;
         double[] xDist = new double[K];
@@ -274,17 +284,27 @@ class methodsHW2{
         return xDist;
     }
 
-    private static Vector[] computeFairCenters(double[] ellValues, double[] x, Vector[] groupMeansA, Vector[] groupMeansB){
-        Vector[] centers = new Vector[groupMeansA.length];
+    private static Vector[] computeFairCenters(double[] ellValues, double[] x, Vector[] groupCentroidA, Vector[] groupCentroidB, int d){
+        Vector[] centers = new Vector[groupCentroidA.length];
             // for each cluster i: meanA, meanB are vectors, all the others are scalars. Also, the center is a vector.
             // so for each cluster we first apply the formula for the single components of the vectors, so that we can get a single component of the i-th Center,
         for (int i = 0; i < centers.length; i++) {
-            Vector ithMeanA = groupMeansA[i];
-            Vector ithMeanB = groupMeansB[i];
+            Vector ithCentroidA = groupCentroidA[i];
+            Vector ithCentroidB = groupCentroidB[i];
 
-            double[] ithClusterFairCenter = new double[ithMeanA.size()];
-            for(int j = 0; j < ithMeanA.size(); j++){
-                ithClusterFairCenter[j] = ((ellValues[i] - x[i])*ithMeanA.apply(j) + x[i]*ithMeanB.apply(j)) / ellValues[i];
+            double[] ithClusterFairCenter = new double[d];
+            // We have to do some checks on the addends of the additions to make sure
+            // the centroid can be computed even in the case one of the two clusters is 0
+            double addendA = 0.0;
+            double addendB = 0.0;
+            // for each component of the ithCentroid's compute each component of the centers
+            for(int j = 0; j < d; j++){
+                if(ellValues[i] > 0.0){
+                    addendA = (ellValues[i] - x[i]) * ithCentroidA.apply(j);
+                    addendB = x[i] * ithCentroidB.apply(j);
+                    ithClusterFairCenter[j] = (addendA+addendB) / ellValues[i];
+                }
+                else ithClusterFairCenter[j] = ithCentroidA.apply(j); // case "one empty cluster"
             }
             // than we gather all the components of the i-th Center into one Vector of doubles
             centers[i] = Vectors.dense(ithClusterFairCenter);
@@ -311,11 +331,11 @@ class methodsHW2{
         double totalDistance = clustersGroup.map(pair -> {
             int clusterId = pair._1();
             ArrayList<Tuple2<Vector, String>> cluster = pair._2();
-            Vector ithMean = means[clusterId];
+            Vector ithCentroid = means[clusterId];
 
             double ithTotDistanceFromClusters = 0;
             for (Tuple2<Vector, String> point : cluster) {
-                ithTotDistanceFromClusters += Vectors.sqdist(point._1(), ithMean);
+                ithTotDistanceFromClusters += Vectors.sqdist(point._1(), ithCentroid);
             }
             return ithTotDistanceFromClusters;
         }).reduce(Double::sum);
