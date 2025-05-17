@@ -15,11 +15,10 @@ import java.lang.*;
 import static java.lang.Math.sqrt;
 
 public class G13HW2 {
-
     public static void main(String[] args) {
         if (args.length != 4) {
             throw new IllegalArgumentException("USAGE: file_path L K M");
-        }
+        } // unfairDataset.csv 16 100 10
 
         Logger.getLogger("org").setLevel(Level.OFF);
         Logger.getLogger("akka").setLevel(Level.OFF);
@@ -34,6 +33,9 @@ public class G13HW2 {
 
         // partition the points into L random partitions for the MapReduce algorithm used later in MRPrintStatistics
         JavaRDD<String> inputPoints = sc.textFile(args[0]).repartition(L).cache();
+        if(inputPoints.count() < K){
+            System.out.println("WARNING: Input file is smaller than K number of clusters!");
+        }
 
         // as requested, we count the sizes of the two groups
         long N = inputPoints.count();
@@ -50,7 +52,7 @@ public class G13HW2 {
         long end = System.currentTimeMillis();
         long time_C_stand = end-start;
 
-        // IMPORTANT NOTE: The clusters found by C_stand could have different indices than C_fair even if they are the same
+        // IMPORTANT NOTE: The clusters found by C_stand and C_fair could have different indices than C_fair even if they are the same
         start = System.currentTimeMillis();
         Vector[] C_fair = methodsHW2.MRFairLloyd(inputPoints, K, M);
         end = System.currentTimeMillis();
