@@ -22,7 +22,7 @@ public class G13HW2 {
 
         Logger.getLogger("org").setLevel(Level.OFF);
         Logger.getLogger("akka").setLevel(Level.OFF);
-        SparkConf conf = new SparkConf(true).setAppName("G13HW1");
+        SparkConf conf = new SparkConf(true).setAppName("G13HW2");
         JavaSparkContext sc = new JavaSparkContext(conf);
         sc.setLogLevel("OFF");
 
