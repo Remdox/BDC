@@ -52,7 +52,7 @@ public class G13HW2 {
         long end = System.currentTimeMillis();
         long time_C_stand = end-start;
 
-        // IMPORTANT NOTE: The clusters found by C_stand and C_fair could have different indices than C_fair even if they are the same
+        // IMPORTANT NOTE: The clusters found in C_stand could have different indices than C_fair even if they are the same
         start = System.currentTimeMillis();
         Vector[] C_fair = methodsHW2.MRFairLloyd(inputPoints, K, M);
         end = System.currentTimeMillis();
@@ -97,8 +97,8 @@ class methodsHW2{
                 return new Tuple2<>(finalModel.predict(point._1()), point); // returns a pair point-index of the corresponding cluster
             }).groupByKey(); // groups points of the same cluster (TODO may be inefficient?)
 
-            JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A"); // cluster A
-            JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B"); // cluster B
+            JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A").cache(); // cluster A
+            JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B").cache(); // cluster B
 
             // HW2 assumes K small enough that all static arrays below can be stored as local variables instead of RDD's.
             long[] clustersCountA = getClustersGroupCounts(clustersGroupA, K); // | A ∩ U_i |
@@ -123,6 +123,9 @@ class methodsHW2{
             double[] x = computeVectorX(fixedA, fixedB, alphas, betas, euclNorms, K);
 
             centers = computeFairCenters(euclNorms, x, groupCentroidA, groupCentroidB, d);
+
+            clustersGroupA.unpersist();
+            clustersGroupB.unpersist();
         }
         return centers;
     }
