@@ -95,7 +95,7 @@ class methodsHW2{
             KMeansModel finalModel = model;
             JavaPairRDD<Integer, Iterable<Tuple2<Vector, String>>> pairsPointsToCluster = parsedInputPoints.mapToPair(point -> {
                 return new Tuple2<>(finalModel.predict(point._1()), point); // returns a pair point-index of the corresponding cluster
-            }).groupByKey(); // groups points of the same cluster (TODO may be inefficient?)
+            }).groupByKey(); // groups points of the same cluster
 
             JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupA = getClustersOfGroup(pairsPointsToCluster, "A").cache(); // cluster A
             JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupB = getClustersOfGroup(pairsPointsToCluster, "B").cache(); // cluster B
@@ -109,12 +109,12 @@ class methodsHW2{
             double[] betas = getGroupPartialCounts(clustersCountB, countInputPointsB);
 
             // M^A and M^B
-            Tuple2<Vector[], Vector[]> groupCentroids = getGroupsCentroids(clustersGroupA, clustersGroupB, clustersCountA, clustersCountB, K, d);
+            Tuple2<Vector[], Vector[]> groupCentroids = getGroupsCentroids(clustersGroupA, clustersGroupB, clustersCountA, clustersCountB, K);
             Vector[] groupCentroidA = groupCentroids._1();
             Vector[] groupCentroidB = groupCentroids._2();
 
             // ell
-            double[] euclNorms = getEuclideanNorms(groupCentroidA, groupCentroidB, K, alphas, betas);
+            double[] euclNorms = getEuclideanNorms(groupCentroidA, groupCentroidB, K);
 
             // prepare parameters for computeVectorX, which is used as-is from the HW
             double fixedA = getTotalDistanceForEachCluster(clustersGroupA, groupCentroidA)/countInputPointsA;
@@ -131,20 +131,18 @@ class methodsHW2{
     }
 
     private static double[] getGroupPartialCounts(long[] clustersCountA, long countInputPointsA) {
-        double result[] = new double[clustersCountA.length];
-        for(int i=0; i<clustersCountA.length; i++){
+        double[] result = new double[clustersCountA.length];
+        for(int i = 0; i < clustersCountA.length; i++){
             result[i] = (double) clustersCountA[i] /countInputPointsA;
         }
         return result;
     }
 
-    private static Vector[] convertToVectorArray(JavaPairRDD<Integer, Vector> startRDD, int K, int d) {
+    private static Vector[] convertToVectorArray(JavaPairRDD<Integer, Vector> startRDD, int K) {
         Map<Integer, Vector> clusterVectors = startRDD.collectAsMap();
         Vector[] result = new Vector[K];
 
-        clusterVectors.forEach((clusterId, vector) -> {
-            result[clusterId] = vector;
-        });
+        clusterVectors.forEach((clusterId, vector) -> result[clusterId] = vector);
         return result;
     }
 
@@ -153,14 +151,12 @@ class methodsHW2{
         long[] result = new long[K];
 
         Arrays.fill(result, 690000);
-        clusterValues.forEach((clusterId, value) -> {
-            result[clusterId] = value;
-        });
+        clusterValues.forEach((clusterId, value) -> result[clusterId] = value);
         return result;
     }
 
 
-    private static double[] getEuclideanNorms(Vector[] groupCentroidA, Vector[] groupCentroidB, int K, double[] alphas, double[] betas) {
+    private static double[] getEuclideanNorms(Vector[] groupCentroidA, Vector[] groupCentroidB, int K) {
         double[] norms = new double[K];
         Arrays.fill(norms, 0.0);
 
@@ -189,9 +185,9 @@ class methodsHW2{
         return convertToLongArray(counts, K);
     }
 
-    private static Tuple2<Vector[], Vector[]> getGroupsCentroids(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupA, JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupB, long[] clustersGroupCountsA, long[] clustersGroupCountsB, int K, int d){
-        Vector[] groupCentroidA = getCentroidsGroupedClusters(clustersGroupA, clustersGroupCountsA, K, d);
-        Vector[] groupCentroidB = getCentroidsGroupedClusters(clustersGroupB, clustersGroupCountsB, K, d);
+    private static Tuple2<Vector[], Vector[]> getGroupsCentroids(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupA, JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroupB, long[] clustersGroupCountsA, long[] clustersGroupCountsB, int K){
+        Vector[] groupCentroidA = getCentroidsGroupedClusters(clustersGroupA, clustersGroupCountsA, K);
+        Vector[] groupCentroidB = getCentroidsGroupedClusters(clustersGroupB, clustersGroupCountsB, K);
         // check size of each vector and set the empty ones to the one of the other group, so that ell is = 0
         for(int i = 0; i < groupCentroidA.length; i++){
             if(groupCentroidA[i].size() == 0){
@@ -206,7 +202,7 @@ class methodsHW2{
         return new Tuple2<>(groupCentroidA, groupCentroidB);
     }
 
-    private static Vector[] getCentroidsGroupedClusters(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroup, long[] clustersGroupCounts, int K, int d) {
+    private static Vector[] getCentroidsGroupedClusters(JavaPairRDD<Integer, ArrayList<Tuple2<Vector, String>>> clustersGroup, long[] clustersGroupCounts, int K) {
         JavaPairRDD<Integer, Vector> clustersMeans = clustersGroup.mapToPair(clusterPair -> {
             double[] sum = {};
             for (Tuple2<Vector, String> point : clusterPair._2()) {
@@ -227,7 +223,7 @@ class methodsHW2{
             Vector ithCentroid = Vectors.dense(centroid);
             return new Tuple2<>(clusterId, ithCentroid);
         });
-        return convertToVectorArray(clustersMeans, K, d);
+        return convertToVectorArray(clustersMeans, K);
     }
 
 

@@ -28,7 +28,7 @@ public class G13GEN {
 
                 if(pointsAForCluster == 0) System.out.println("WARNING: ill-defined cluster size or frequency for points of group A. This will result in clusters without points belonging to group B.");
 
-                double clusterDistanceIncrease = (k/4) * 100000;
+                double clusterDistanceIncrease = ((double) k /4) * 100000;
                 double centroidX = dirX * (clusterDistance + clusterDistanceIncrease);
                 double centroidY = dirY * (clusterDistance + clusterDistanceIncrease);
 
