@@ -31,7 +31,7 @@ public class G13HW2 {
         int K = Integer.parseInt(args[2]);
         int M = Integer.parseInt(args[3]);
 
-        // partition the points into L random partitions for the MapReduce algorithm used later in MRPrintStatistics
+        // partition the points into L random partitions
         JavaRDD<String> inputPoints = sc.textFile(args[0]).repartition(L).cache();
         if(inputPoints.count() < K){
             System.out.println("WARNING: Input file is smaller than K number of clusters!");
@@ -130,10 +130,10 @@ class methodsHW2{
         return centers;
     }
 
-    private static double[] getGroupPartialCounts(long[] clustersCountA, long countInputPointsA) {
-        double[] result = new double[clustersCountA.length];
-        for(int i = 0; i < clustersCountA.length; i++){
-            result[i] = (double) clustersCountA[i] /countInputPointsA;
+    private static double[] getGroupPartialCounts(long[] clustersCount, long countInputPoints) {
+        double[] result = new double[clustersCount.length];
+        for(int i = 0; i < clustersCount.length; i++){
+            result[i] = (double) clustersCount[i] /countInputPoints;
         }
         return result;
     }
@@ -154,7 +154,6 @@ class methodsHW2{
         clusterValues.forEach((clusterId, value) -> result[clusterId] = value);
         return result;
     }
-
 
     private static double[] getEuclideanNorms(Vector[] groupCentroidA, Vector[] groupCentroidB, int K) {
         double[] norms = new double[K];
@@ -225,8 +224,7 @@ class methodsHW2{
         });
         return convertToVectorArray(clustersMeans, K);
     }
-
-
+    
     public static JavaRDD<Vector> conversion(JavaRDD<String> inputPoints){
         JavaRDD<Vector> parsedInputPoints = inputPoints.map(row -> {
             String[] rowArray = row.split(",");
