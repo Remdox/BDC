@@ -22,7 +22,7 @@ public class G13HW3 {
         // code will crash with an out of memory (because the input keeps accumulating).
         SparkConf conf = new SparkConf(true)
                 .setMaster("local[*]") // remove this line if running on the cluster
-                .setAppName("DistinctExample");
+                .setAppName("G13HW3");
 
         // The definition of the streaming spark context  below, specifies the amount of
         // time used for collecting a batch, hence giving some control on the batch size.
@@ -35,12 +35,11 @@ public class G13HW3 {
         stoppingSemaphore.acquire();
 
         int portExp = Integer.parseInt(args[0]);
-        System.out.println("Receiving data from port = " + portExp);
         int T = Integer.parseInt(args[1]); // threshold
-        System.out.println("Threshold = " + T);
         int D = Integer.parseInt(args[2]); // number of rows of each sketch
         int W = Integer.parseInt(args[3]); // number of cols of each sketch
         int K = Integer.parseInt(args[4]); // number of top frequent items of interest
+        System.out.println("Port = " + portExp + " T = " + T + " D = " + D + " W = " + W + " K = " + K);
 
         // Variable streamLength below is used to maintain the number of processed stream items.
         // It must be defined as a 1-element array so that the value stored into the array can be
@@ -49,6 +48,7 @@ public class G13HW3 {
         long[] streamLength = new long[1]; // Stream length (an array to be passed by reference)
         streamLength[0] = 0L;
         HashMap<Long, Long> streamItemsFrequency = new HashMap<>();
+        Sketch streamCountMinSketch = new Sketch(D, W);
         Sketch streamCountSketch = new Sketch(D, W);
 
         // initializing the hash functions
@@ -65,17 +65,17 @@ public class G13HW3 {
                         long batchSize = batch.count();
                         streamLength[0] += batchSize;
                         if (batchSize > 0) {
-                            System.out.println("Batch size at time [" + time + "] is: " + batchSize);
                             // true frequencies
                             Map<Long, Long> batchItemsFrequencies =  methodsHW3.countDistinctItemsFreq(batch);
 
                             // Count-min Sketch
-                            //
+                            Sketch batchCountMinSketch = methodsHW3.ComputeCountMinSketch(batch, D, W, hashFunctions);
 
                             // Count Sketch
                             Sketch batchCountSketch = methodsHW3.ComputeCountSketch(batch, D, W, hashFunctions, randomBias);
 
                             // exporting both Count-min Sketch and Count Sketch
+                            if(!streamCountMinSketch.mergeWith(batchCountMinSketch)) System.err.println("Merge failed");
                             if(!streamCountSketch.mergeWith(batchCountSketch)) System.err.println("Merge failed");
 
                             // exporting the true frequencies of each distinct item
@@ -83,7 +83,6 @@ public class G13HW3 {
                                 if (!streamItemsFrequency.containsKey(pair.getKey())) streamItemsFrequency.put(pair.getKey(), pair.getValue());
                                 else if(!Objects.equals(streamItemsFrequency.get(pair.getKey()), pair.getValue())) streamItemsFrequency.replace(pair.getKey(), streamItemsFrequency.get(pair.getKey()) + pair.getValue());
                             }
-                            // If we wanted, here we could run some additional code on the global histogram
 
                             if (streamLength[0] >= T) {
                                 // Stop receiving and processing further batches
@@ -95,25 +94,32 @@ public class G13HW3 {
                 });
 
         // MANAGING STREAMING SPARK CONTEXT
-        System.out.println("Starting streaming engine");
         sc.start();
-        System.out.println("Waiting for shutdown condition");
         stoppingSemaphore.acquire();
-        System.out.println("Stopping the streaming engine");
         sc.stop(false, false);
-        System.out.println("Streaming engine stopped");
 
         // COMPUTE AND PRINT FINAL STATISTICS
-        Map<Long, Long> streamItemsFrequenciesCS = methodsHW3.getItemFrequencies(streamItemsFrequency, streamCountSketch, hashFunctions, randomBias);
-        double avgFreqErrorsCS = methodsHW3.calcAvgErrorKhittersCS(streamItemsFrequency, streamItemsFrequenciesCS, K);
+        Map<Long, Long> streamItemsFrequenciesCM = methodsHW3.getItemFrequenciesCM(streamItemsFrequency, streamCountMinSketch, hashFunctions);
+        double avgFreqErrorsCM = methodsHW3.calcAvgErrorKhitters(streamItemsFrequency, streamItemsFrequenciesCM, K);
+        Map<Long, Long> streamItemsFrequenciesCS = methodsHW3.getItemFrequenciesCS(streamItemsFrequency, streamCountSketch, hashFunctions, randomBias);
+        double avgFreqErrorsCS = methodsHW3.calcAvgErrorKhitters(streamItemsFrequency, streamItemsFrequenciesCS, K);
 
         System.out.println("Number of processed items = " + streamLength[0]);
         System.out.println("Number of distinct items = " + streamItemsFrequency.size());
-        System.out.println("Number of Top-K heavy hitters = " + streamItemsFrequency.size());
-        long max = 0L;
-        ArrayList<Long> distinctKeys = new ArrayList<>(streamItemsFrequency.keySet());
-        Collections.sort(distinctKeys, Collections.reverseOrder());
-        System.out.println("Largest item = " + distinctKeys.get(0));
+        System.out.println("Number of Top-K heavy hitters = " + methodsHW3.getTrueKhitters(streamItemsFrequency, K).size());
+        System.out.println("Avg Relative Error for Top-K Heavy Hitters with CM = " + avgFreqErrorsCM);
+        System.out.println("Avg Relative Error for Top-K Heavy Hitters with CS = " + avgFreqErrorsCS);
+        if(K <= 10){
+            System.out.println("Top-K Heavy Hitters:");
+            List<Tuple2<Long, Long>> trueKhitters = methodsHW3.getTrueKhitters(streamItemsFrequency, K);
+            trueKhitters.sort(Comparator.comparingLong(Tuple2::_1));
+            for (Tuple2<Long, Long> item : trueKhitters) {
+                Long id = item._1();
+                Long trueFreq = item._2();
+                Long cmEst = streamItemsFrequenciesCM.get(id);
+                System.out.println("Item " + id + " True Frequency = " + trueFreq + " Estimated Frequency with CM = " + cmEst);
+            }
+        }
     }
 }
 
@@ -192,13 +198,6 @@ class Sketch implements Serializable {
 }
 
 class methodsHW3{
-    static public Map<Long, Long> getDistinctItems(JavaRDD<String> batch){
-        return batch
-                .mapToPair(s -> new Tuple2<>(Long.parseLong(s), 1L)) // associate each item with count 1
-                .reduceByKey((i1, i2) -> 1L) // removes duplicates of the same key
-                .collectAsMap();
-    }
-
     static public Map<Long, Long> countDistinctItemsFreq(JavaRDD<String> batch){
         // Extract the distinct items and counts from the batch
         Map<Long, Long> batchItems = batch
@@ -206,6 +205,23 @@ class methodsHW3{
                 .reduceByKey(Long::sum) // removes duplicates of the same key by summing up their counts
                 .collectAsMap(); // return distinct items: item-count
         return batchItems;
+    }
+
+    static public Sketch ComputeCountMinSketch(JavaRDD<String> batch, int rowsSketch, int colsSketch, HashFunction[] hashFunctions){
+        Sketch batchSketch = batch.mapPartitions(partition -> {
+            Sketch partitionSketch = new Sketch(rowsSketch, colsSketch);
+
+            partition.forEachRemaining(batchItem ->{
+                Long item = Long.parseLong(batchItem);
+                for (int j = 0; j < rowsSketch; j++) {
+                    int hj = hashFunctions[j].computeHashValue(item);
+                    partitionSketch.setCounter(j, hj, (partitionSketch.getCounter(j, hj) + 1));
+                }
+            });
+            return Collections.singleton(partitionSketch).iterator();
+        }).reduce(Sketch::merge);
+
+        return batchSketch;
     }
 
     static public Sketch ComputeCountSketch(JavaRDD<String> batch, int rowsSketch, int colsSketch, HashFunction[] hashFunctions, HashFunction[] randomBias){
@@ -240,7 +256,7 @@ class methodsHW3{
         return batchSketch;
     }
 
-    static public Map<Long, Long> getItemFrequencies(Map<Long, Long> distinctItems, Sketch sketch, HashFunction[] hashFunctions, HashFunction[] randomBias){
+    static public Map<Long, Long> getItemFrequenciesCS(Map<Long, Long> distinctItems, Sketch sketch, HashFunction[] hashFunctions, HashFunction[] randomBias){
         HashMap<Long, Long> itemsMedianFreq = new HashMap<>();
         for(Long key : distinctItems.keySet()){
             long[] itemFreqs = new long[sketch.getRowsSketch()];
@@ -253,6 +269,20 @@ class methodsHW3{
             itemsMedianFreq.put(key, getMedianFrequency(itemFreqs));
         }
         return itemsMedianFreq;
+    }
+
+    static public Map<Long, Long> getItemFrequenciesCM(Map<Long, Long> distinctItems, Sketch sketch, HashFunction[] hashFunctions){
+        HashMap<Long, Long> itemsMinFreq = new HashMap<>();
+        for(Long key : distinctItems.keySet()){
+            long minFreq = Long.MAX_VALUE;
+            for(int j = 0; j < sketch.getRowsSketch(); j++){
+                int hj = hashFunctions[j].computeHashValue(key);
+                long count = sketch.getCounter(j, hj);
+                if(count < minFreq) minFreq = count;
+            }
+            itemsMinFreq.put(key, minFreq);
+        }
+        return itemsMinFreq;
     }
 
     static public HashFunction[] generateHashFunctions(int rowsSketch, int colsSketch){
@@ -272,20 +302,20 @@ class methodsHW3{
         else return arr[mid];
     }
 
-    static public double calcAvgErrorKhittersCS(Map<Long, Long> itemFreqs, Map<Long, Long> freqsItemCS, int K){
+    static public double calcAvgErrorKhitters(Map<Long, Long> itemFreqs, Map<Long, Long> freqsItem, int K){
         // getting the K-Hitters for the true frequencies
         List<Tuple2<Long, Long>> trueKhitters = getTrueKhitters(itemFreqs, K);
 
         // getting the K-Hitters for the estimates
-        List<Tuple2<Long, Long>> kHittersCS = new ArrayList<>();
-        for(Tuple2<Long, Long> item : trueKhitters) kHittersCS.add(new Tuple2<>(item._1(), freqsItemCS.get(item._1())) );
+        List<Tuple2<Long, Long>> kHitters = new ArrayList<>();
+        for(Tuple2<Long, Long> item : trueKhitters) kHitters.add(new Tuple2<>(item._1(), freqsItem.get(item._1())) );
 
         // computing the average relative error between estimate and true freq
         // because of how we built the second array, we expect the items to have the same index in both of them
         double cumulativeError = 0;
         for(int i = 0; i < trueKhitters.size(); i++){
             long trueFreq = trueKhitters.get(i)._2();
-            long estimatedFreq = kHittersCS.get(i)._2();
+            long estimatedFreq = kHitters.get(i)._2();
             cumulativeError += (double) Math.abs(trueFreq - estimatedFreq) / trueFreq;
         }
         double avgErrorCS = cumulativeError / trueKhitters.size();
