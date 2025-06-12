@@ -65,13 +65,10 @@ public class G13HW3 {
                         long batchSize = batch.count();
                         streamLength[0] += batchSize;
                         if (batchSize > 0) {
-                            // true frequencies
                             Map<Long, Long> batchItemsFrequencies =  methodsHW3.countDistinctItemsFreq(batch);
 
-                            // Count-min Sketch
                             Sketch batchCountMinSketch = methodsHW3.ComputeCountMinSketch(batch, D, W, hashFunctions);
 
-                            // Count Sketch
                             Sketch batchCountSketch = methodsHW3.ComputeCountSketch(batch, D, W, hashFunctions, randomBias);
 
                             // exporting both Count-min Sketch and Count Sketch
@@ -140,6 +137,11 @@ class HashFunction implements Serializable {
         Random randomGenerator = new Random();
         do{ a = randomGenerator.nextInt(p); } while (a == 0);
         b = randomGenerator.nextInt(p);
+    }
+
+    public void setFixedCoeffs(int i){
+        a = i % p;
+        b = i % p;
     }
 
     public int computeHashValue(Long x){
@@ -290,6 +292,7 @@ class methodsHW3{
         for(int i = 0; i < rowsSketch; i++){
             hashFunctions[i] = new HashFunction(colsSketch);
             hashFunctions[i].setRandomCoeffs();
+            // hashFunctions[i].setFixedCoeffs(i);
         }
         return hashFunctions;
     }
@@ -303,7 +306,6 @@ class methodsHW3{
     }
 
     static public double calcAvgErrorKhitters(Map<Long, Long> itemFreqs, Map<Long, Long> freqsItem, int K){
-        // getting the K-Hitters for the true frequencies
         List<Tuple2<Long, Long>> trueKhitters = getTrueKhitters(itemFreqs, K);
 
         // getting the K-Hitters for the estimates
